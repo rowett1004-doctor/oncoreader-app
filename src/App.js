@@ -15,6 +15,11 @@ import {
   Tag,
 } from "lucide-react";
 
+
+// ==========================================
+// [설정] .env 파일에서 키를 가져옵니다.
+// ==========================================
+
 const API_KEY = process.env.REACT_APP_GEMINI_API_KEY;
 
 const RSS_FEEDS = [
@@ -89,9 +94,10 @@ const fetchArticles = async (feeds, onProgress) => {
     const feed = feeds[i];
     onProgress(((i + 1) / total) * 100, `Fetching ${feed.name}...`);
     try {
+      // 데이터는 여전히 넉넉하게 50개씩 가져옵니다 (놓치는 것 없도록)
       const proxyUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(
         feed.url
-      )}`;
+      )}&count=50`;
       const response = await fetch(proxyUrl);
       const data = await response.json();
       if (data.status === "ok") {
@@ -122,10 +128,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 1024);
   const [aiSummary, setAiSummary] = useState(null);
   const [analyzingId, setAnalyzingId] = useState(null);
-
-  // 날짜 필터 상태 (기본값: 전체)
   const [dateRange, setDateRange] = useState("all"); // '7d', '30d', '90d', 'all'
-
   const [keywords, setKeywords] = useState(
     () =>
       localStorage.getItem("keywords") ||
@@ -238,6 +241,13 @@ export default function App() {
         return true;
       });
   }, [articles, viewMode, searchTerm, keywordList, dateRange]);
+
+  const dateOptions = [
+    { label: "7일", value: "7d" },
+    { label: "30일", value: "30d" },
+    { label: "90일", value: "90d" },
+    { label: "전체", value: "all" },
+  ];
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans overflow-hidden">
@@ -398,7 +408,8 @@ export default function App() {
         {/* 메인 콘텐츠 */}
         <main className="flex-1 bg-slate-50 overflow-y-auto p-4 custom-scrollbar">
           <div className="max-w-3xl mx-auto space-y-4">
-            {/* 모바일용 날짜 필터 (화면 작을때만 보임) */}
+
+{/* 모바일용 날짜 필터 (화면 작을때만 보임) */}
             <div className="md:hidden flex overflow-x-auto gap-2 pb-2">
               {[
                 { l: "7일", v: "7d" },
