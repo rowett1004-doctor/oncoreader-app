@@ -10,14 +10,15 @@ import {
   Play,
   X,
   Layers,
+  Trash2,
+  Plus,
+  Tag,
 } from "lucide-react";
 
 // ==========================================
-// [설정] .env 파일에서 키를 가져오거나,
-// .env가 안될 경우를 대비해 여기에 직접 넣으셔도 됩니다.
+// [설정] .env 파일에서 키를 가져옵니다.
 // ==========================================
-const API_KEY =
-  process.env.REACT_APP_GEMINI_API_KEY || "여기에_키를_넣으셔도_됩니다";
+const API_KEY = process.env.REACT_APP_GEMINI_API_KEY;
 
 const RSS_FEEDS = [
   {
@@ -91,9 +92,10 @@ const fetchArticles = async (feeds, onProgress) => {
     const feed = feeds[i];
     onProgress(((i + 1) / total) * 100, `Fetching ${feed.name}...`);
     try {
+      // 데이터는 여전히 넉넉하게 50개씩 가져옵니다 (놓치는 것 없도록)
       const proxyUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(
         feed.url
-      )}`;
+      )}&count=50`;
       const response = await fetch(proxyUrl);
       const data = await response.json();
       if (data.status === "ok") {
@@ -102,7 +104,7 @@ const fetchArticles = async (feeds, onProgress) => {
           journal: feed.name,
           title: item.title,
           link: item.link,
-          date: item.pubDate.split(" ")[0],
+          date: item.pubDate.split(" ")[0], // YYYY-MM-DD
           summary: item.description || item.content || "",
           matchedKeywords: [],
         }));
@@ -124,6 +126,8 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 1024);
   const [aiSummary, setAiSummary] = useState(null);
   const [analyzingId, setAnalyzingId] = useState(null);
+
+  const [dateRange, setDateRange] = useState("all");
 
   const [keywords, setKeywords] = useState(
     () =>
@@ -154,6 +158,14 @@ export default function App() {
     setSelectedFeeds(next);
   };
 
+  const toggleAllFeeds = () => {
+    if (selectedFeeds.size === RSS_FEEDS.length) {
+      setSelectedFeeds(new Set());
+    } else {
+      setSelectedFeeds(new Set(RSS_FEEDS.map((f) => f.url)));
+    }
+  };
+
   const refreshData = async () => {
     setLoading(true);
     const targetFeeds = RSS_FEEDS.filter((f) => selectedFeeds.has(f.url));
@@ -165,17 +177,14 @@ export default function App() {
   };
 
   const analyzeWithAI = async (article) => {
-    if (!API_KEY || API_KEY.includes("넣으세요")) {
-      alert("API 키를 입력해주세요!");
+    if (!API_KEY) {
+      alert("API 키가 설정되지 않았습니다.");
       return;
     }
     setAnalyzingId(article.id);
     try {
       const genAI = new GoogleGenerativeAI(API_KEY);
-
-      // [수정 포인트] 모델명을 2.0 Flash로 변경했습니다!
       const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
-
       const prompt = `당신은 종양내과 전문의입니다. 다음 논문 초록을 요약하세요.\n제목: ${article.title}\n초록: ${article.summary}\n[형식]\n1. 핵심요약(3줄)\n2. 임상적 의의\n3. 추천 대상`;
       const result = await model.generateContent(prompt);
       const response = await result.response;
@@ -194,7 +203,10 @@ export default function App() {
         .filter((k) => k),
     [keywords]
   );
+
   const filteredArticles = useMemo(() => {
+    const now = new Date();
+
     return articles
       .map((a) => {
         const content = (a.title + " " + a.summary).toLowerCase();
@@ -209,40 +221,101 @@ export default function App() {
           !a.title.toLowerCase().includes(searchTerm.toLowerCase())
         )
           return false;
+
+        // [수정] 다시 90일 필터로 복귀
+        if (dateRange !== "all") {
+          if (!a.date || a.date === "Unknown") return false;
+
+          const articleDate = new Date(a.date);
+          const diffTime = Math.abs(now - articleDate);
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+          if (dateRange === "7d" && diffDays > 7) return false;
+          if (dateRange === "30d" && diffDays > 30) return false;
+          if (dateRange === "90d" && diffDays > 90) return false; // 90일 복구
+        }
+
         return true;
       });
-  }, [articles, viewMode, searchTerm, keywordList]);
+  }, [articles, viewMode, searchTerm, keywordList, dateRange]);
+
+  // [수정] 버튼 옵션도 90일로 복구
+  const dateOptions = [
+    { label: "7일", value: "7d" },
+    { label: "30일", value: "30d" },
+    { label: "90일", value: "90d" },
+    { label: "전체", value: "all" },
+  ];
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans overflow-hidden">
+      {/* 헤더 */}
       <header className="h-14 border-b flex items-center justify-between px-4 bg-white shadow-sm sticky top-0 z-30">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-1">
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
             className="p-2 hover:bg-slate-100 rounded-full lg:hidden"
           >
             <Menu size={20} />
           </button>
-          <span className="font-bold text-lg text-emerald-700">OncoReader</span>
+          <span className="font-bold text-lg text-emerald-700 hidden sm:inline">
+            OncoReader
+          </span>
+
+          {/* 검색창 */}
+          <div className="relative max-w-xs w-full ml-2">
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300"
+              size={14}
+            />
+            <input
+              type="text"
+              placeholder="Search..."
+              className="w-full bg-slate-100 border-none rounded-full py-1.5 pl-9 pr-4 text-xs focus:ring-1 focus:ring-emerald-500 outline-none"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
         </div>
-        <button
-          onClick={refreshData}
-          disabled={loading}
-          className="flex items-center gap-2 px-4 py-1.5 bg-emerald-600 text-white rounded-full text-xs font-bold shadow hover:bg-emerald-700 disabled:opacity-50"
-        >
-          <RefreshCw size={14} className={loading ? "animate-spin" : ""} />{" "}
-          {loading ? "동기화..." : "새로고침"}
-        </button>
+
+        <div className="flex items-center gap-2">
+          {/* PC용 날짜 필터 버튼 */}
+          <div className="hidden md:flex bg-slate-100 p-1 rounded-lg mr-2">
+            {dateOptions.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setDateRange(opt.value)}
+                className={`px-3 py-1 text-[10px] font-bold rounded-md transition-all ${
+                  dateRange === opt.value
+                    ? "bg-white text-emerald-600 shadow-sm"
+                    : "text-slate-400 hover:text-slate-600"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={refreshData}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-1.5 bg-emerald-600 text-white rounded-full text-xs font-bold shadow hover:bg-emerald-700 disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />{" "}
+            {loading ? "동기화..." : "Sync"}
+          </button>
+        </div>
       </header>
 
       <div className="flex flex-1 overflow-hidden relative">
+        {/* 사이드바 */}
         <aside
           className={`${
             isSidebarOpen ? "translate-x-0" : "-translate-x-full"
           } lg:translate-x-0 absolute lg:relative w-64 h-full bg-white border-r z-20 transition-transform duration-300 flex flex-col shadow-lg lg:shadow-none`}
         >
-          <div className="p-4 flex-1 overflow-y-auto">
-            <div className="space-y-1 mb-6">
+          <div className="p-4 flex-1 overflow-y-auto custom-scrollbar">
+            <nav className="space-y-1 mb-6">
               <button
                 onClick={() => {
                   setViewMode("all");
@@ -268,28 +341,43 @@ export default function App() {
                 }`}
               >
                 <Star size={16} /> 관심 논문
+                {keywordList.length > 0 && (
+                  <span className="ml-auto text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">
+                    {keywordList.length}
+                  </span>
+                )}
               </button>
-            </div>
+            </nav>
+
             <div className="mb-4">
-              <span className="text-xs font-bold text-slate-400 uppercase px-2">
-                키워드 설정
+              <span className="text-[10px] font-bold text-slate-400 uppercase px-2 mb-2 block">
+                Keywords
               </span>
               <textarea
                 value={keywords}
                 onChange={(e) => setKeywords(e.target.value)}
-                className="w-full mt-2 p-2 text-xs border rounded-lg h-20 focus:border-emerald-500 outline-none resize-none bg-slate-50"
+                className="w-full p-2 text-xs border rounded-lg h-20 focus:border-emerald-500 outline-none resize-none bg-slate-50"
               />
             </div>
+
             <div>
-              <span className="text-xs font-bold text-slate-400 uppercase px-2 mb-2 block">
-                저널 구독 ({selectedFeeds.size})
-              </span>
-              <div className="space-y-1">
+              <div className="flex justify-between items-center px-2 mb-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">
+                  Journals ({selectedFeeds.size})
+                </span>
+                <button
+                  onClick={toggleAllFeeds}
+                  className="text-[10px] text-emerald-600 font-bold hover:underline"
+                >
+                  Toggle All
+                </button>
+              </div>
+              <div className="space-y-0.5">
                 {RSS_FEEDS.map((feed) => (
                   <div
                     key={feed.url}
                     onClick={() => toggleFeed(feed.url)}
-                    className="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-slate-100 rounded text-xs font-medium text-slate-600"
+                    className="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-slate-50 rounded text-xs font-medium text-slate-600"
                   >
                     <div
                       className={`w-3 h-3 rounded-sm border shrink-0 ${
@@ -310,33 +398,48 @@ export default function App() {
           </div>
         </aside>
 
-        <main className="flex-1 bg-slate-100 overflow-y-auto p-4">
-          <div className="max-w-2xl mx-auto space-y-4">
-            <div className="bg-white rounded-xl p-2 flex items-center gap-2 border shadow-sm">
-              <Search className="text-slate-400 ml-2" size={16} />
-              <input
-                type="text"
-                placeholder="제목 검색..."
-                className="flex-1 outline-none text-sm"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+        {/* 메인 콘텐츠 */}
+        <main className="flex-1 bg-slate-50 overflow-y-auto p-4 custom-scrollbar">
+          <div className="max-w-3xl mx-auto space-y-4">
+            {/* 모바일용 날짜 필터 (90일) */}
+            <div className="md:hidden flex overflow-x-auto gap-2 pb-2">
+              {dateOptions.map((o) => (
+                <button
+                  key={o.value}
+                  onClick={() => setDateRange(o.value)}
+                  className={`whitespace-nowrap px-3 py-1 rounded-full text-xs font-bold border ${
+                    dateRange === o.value
+                      ? "bg-emerald-600 text-white border-emerald-600"
+                      : "bg-white text-slate-500 border-slate-200"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
             </div>
 
             {loading && articles.length === 0 && (
-              <div className="text-center py-10 text-slate-500 text-sm">
-                <RefreshCw className="animate-spin mx-auto mb-2" />
-                <p>{progress.message}</p>
+              <div className="text-center py-12 text-slate-400">
+                <RefreshCw
+                  className="animate-spin mx-auto mb-3 text-emerald-500"
+                  size={24}
+                />
+                <p className="text-sm font-medium text-slate-600">
+                  {progress.message}
+                </p>
+                <p className="text-xs mt-1">{Math.round(progress.percent)}%</p>
               </div>
             )}
 
             {!loading && filteredArticles.length === 0 && (
               <div className="text-center py-20 text-slate-400">
-                <Layers size={48} className="mx-auto mb-4 opacity-50" />
+                <Layers size={48} className="mx-auto mb-4 opacity-30" />
                 <p>
                   표시할 논문이 없습니다.
                   <br />
-                  '새로고침'을 누르세요.
+                  <span className="text-xs">
+                    상단의 'Sync' 버튼을 누르거나 필터를 변경해보세요.
+                  </span>
                 </p>
               </div>
             )}
@@ -347,66 +450,72 @@ export default function App() {
                 className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow"
               >
                 <div className="p-4">
-                  <div className="flex justify-between items-start mb-2">
-                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full truncate max-w-[200px]">
+                  <div className="flex justify-between items-start mb-2 gap-2">
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md truncate">
                       {article.journal}
                     </span>
                     <span className="text-[10px] text-slate-400 shrink-0">
                       {article.date}
                     </span>
                   </div>
-                  <h3 className="font-bold text-slate-800 leading-tight mb-2">
+                  <h3 className="font-bold text-slate-800 leading-snug mb-2 text-sm sm:text-base">
                     <a
                       href={article.link}
                       target="_blank"
                       rel="noreferrer"
-                      className="hover:text-emerald-600"
+                      className="hover:text-emerald-600 transition-colors"
                     >
                       {article.title}
                     </a>
                   </h3>
+
                   {article.matchedKeywords.length > 0 && (
                     <div className="flex gap-1 flex-wrap mb-3">
                       {article.matchedKeywords.map((k) => (
                         <span
                           key={k}
-                          className="text-[10px] bg-yellow-50 text-yellow-700 px-1.5 py-0.5 rounded border border-yellow-100"
+                          className="text-[10px] bg-yellow-50 text-yellow-700 px-1.5 py-0.5 rounded border border-yellow-100 font-medium"
                         >
                           #{k}
                         </span>
                       ))}
                     </div>
                   )}
-                  <div className="flex gap-2 mt-3 pt-3 border-t">
+
+                  <div className="flex gap-2 mt-3 pt-3 border-t border-slate-50">
                     <button
                       onClick={() => analyzeWithAI(article)}
                       disabled={analyzingId === article.id}
-                      className="flex-1 flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 py-2 rounded-lg text-xs font-bold text-slate-600"
+                      className="flex-1 flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 py-2 rounded-lg text-xs font-bold text-slate-600 transition-colors"
                     >
                       {analyzingId === article.id ? (
                         <RefreshCw size={14} className="animate-spin" />
                       ) : (
                         <Play size={14} />
-                      )}{" "}
+                      )}
                       AI 요약
                     </button>
                     <a
                       href={article.link}
                       target="_blank"
                       rel="noreferrer"
-                      className="flex-1 flex items-center justify-center bg-emerald-50 hover:bg-emerald-100 py-2 rounded-lg text-xs font-bold text-emerald-700"
+                      className="flex-1 flex items-center justify-center bg-emerald-50 hover:bg-emerald-100 py-2 rounded-lg text-xs font-bold text-emerald-700 transition-colors"
                     >
                       원문 보기
                     </a>
                   </div>
                 </div>
+
                 {aiSummary && aiSummary.id === article.id && (
-                  <div className="bg-slate-50 p-4 border-t text-sm text-slate-700 whitespace-pre-line leading-relaxed">
-                    <div className="flex justify-between items-center mb-2">
-                      <strong className="text-emerald-700 flex items-center gap-2">
-                        <Star size={14} /> AI 분석
+                  <div className="bg-slate-50 p-4 border-t border-slate-100 text-sm text-slate-700 whitespace-pre-line leading-relaxed relative animate-fadeIn">
+                    <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-200">
+                      <strong className="text-emerald-700 flex items-center gap-2 text-xs uppercase tracking-wider">
+                        <Star size={12} fill="currentColor" /> AI Analysis
                       </strong>
-                      <button onClick={() => setAiSummary(null)}>
+                      <button
+                        onClick={() => setAiSummary(null)}
+                        className="text-slate-400 hover:text-slate-600"
+                      >
                         <X size={14} />
                       </button>
                     </div>
@@ -418,6 +527,14 @@ export default function App() {
           </div>
         </main>
       </div>
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .animate-fadeIn { animation: fadeIn 0.3s ease-in; }
+      `}</style>
     </div>
   );
 }
