@@ -15,9 +15,11 @@ import {
   Tag,
 } from "lucide-react";
 
+
 // ==========================================
 // [설정] .env 파일에서 키를 가져옵니다.
 // ==========================================
+
 const API_KEY = process.env.REACT_APP_GEMINI_API_KEY;
 
 const RSS_FEEDS = [
@@ -126,9 +128,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 1024);
   const [aiSummary, setAiSummary] = useState(null);
   const [analyzingId, setAnalyzingId] = useState(null);
-
-  const [dateRange, setDateRange] = useState("all");
-
+  const [dateRange, setDateRange] = useState("all"); // '7d', '30d', '90d', 'all'
   const [keywords, setKeywords] = useState(
     () =>
       localStorage.getItem("keywords") ||
@@ -185,7 +185,7 @@ export default function App() {
     try {
       const genAI = new GoogleGenerativeAI(API_KEY);
       const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
-      const prompt = `당신은 종양내과 전문의입니다. 다음 논문 초록을 요약하세요.\n제목: ${article.title}\n초록: ${article.summary}\n[형식]\n1. 핵심요약(3줄)\n2. 임상적 의의\n3. 추천 대상`;
+      const prompt = `당신은 종양내과 전문의입니다. 다음 논문 초록을 요약하세요.\n제목: ${article.title}\n초록: ${article.summary}\n[형식]\n1. 핵심요약(5줄)\n2. 임상적 의의\n3. 추천 대상`;
       const result = await model.generateContent(prompt);
       const response = await result.response;
       setAiSummary({ id: article.id, text: response.text() });
@@ -214,15 +214,18 @@ export default function App() {
         return { ...a, matchedKeywords: matched };
       })
       .filter((a) => {
+        // 1. 키워드 필터 (관심 논문 모드일 때)
         if (viewMode === "interests" && a.matchedKeywords.length === 0)
           return false;
+
+        // 2. 검색어 필터
         if (
           searchTerm &&
           !a.title.toLowerCase().includes(searchTerm.toLowerCase())
         )
           return false;
 
-        // [수정] 다시 90일 필터로 복귀
+        // 3. 날짜 필터 로직
         if (dateRange !== "all") {
           if (!a.date || a.date === "Unknown") return false;
 
@@ -232,14 +235,13 @@ export default function App() {
 
           if (dateRange === "7d" && diffDays > 7) return false;
           if (dateRange === "30d" && diffDays > 30) return false;
-          if (dateRange === "90d" && diffDays > 90) return false; // 90일 복구
+          if (dateRange === "90d" && diffDays > 90) return false;
         }
 
         return true;
       });
   }, [articles, viewMode, searchTerm, keywordList, dateRange]);
 
-  // [수정] 버튼 옵션도 90일로 복구
   const dateOptions = [
     { label: "7일", value: "7d" },
     { label: "30일", value: "30d" },
@@ -279,9 +281,14 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* PC용 날짜 필터 버튼 */}
+          {/* 날짜 필터 버튼 그룹 */}
           <div className="hidden md:flex bg-slate-100 p-1 rounded-lg mr-2">
-            {dateOptions.map((opt) => (
+            {[
+              { label: "7일", value: "7d" },
+              { label: "30일", value: "30d" },
+              { label: "90일", value: "90d" },
+              { label: "전체", value: "all" },
+            ].map((opt) => (
               <button
                 key={opt.value}
                 onClick={() => setDateRange(opt.value)}
@@ -401,19 +408,25 @@ export default function App() {
         {/* 메인 콘텐츠 */}
         <main className="flex-1 bg-slate-50 overflow-y-auto p-4 custom-scrollbar">
           <div className="max-w-3xl mx-auto space-y-4">
-            {/* 모바일용 날짜 필터 (90일) */}
+
+{/* 모바일용 날짜 필터 (화면 작을때만 보임) */}
             <div className="md:hidden flex overflow-x-auto gap-2 pb-2">
-              {dateOptions.map((o) => (
+              {[
+                { l: "7일", v: "7d" },
+                { l: "30일", v: "30d" },
+                { l: "90일", v: "90d" },
+                { l: "전체", v: "all" },
+              ].map((o) => (
                 <button
-                  key={o.value}
-                  onClick={() => setDateRange(o.value)}
+                  key={o.v}
+                  onClick={() => setDateRange(o.v)}
                   className={`whitespace-nowrap px-3 py-1 rounded-full text-xs font-bold border ${
-                    dateRange === o.value
+                    dateRange === o.v
                       ? "bg-emerald-600 text-white border-emerald-600"
                       : "bg-white text-slate-500 border-slate-200"
                   }`}
                 >
-                  {o.label}
+                  {o.l}
                 </button>
               ))}
             </div>
