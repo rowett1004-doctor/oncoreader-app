@@ -14,7 +14,7 @@ import {
 
 // ==========================================
 const API_KEY =
-  process.env.REACT_APP_GEMINI_API_KEY || "AIzaSyCyaNHCWQOezmNUIf55kM9DrsA1QoOHFWU";
+  process.env.REACT_APP_GEMINI_API_KEY || "              ";
 
 const RSS_FEEDS = [
   {
