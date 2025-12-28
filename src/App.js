@@ -16,6 +16,25 @@ import {
 } from "lucide-react";
 
 
+// 간단한 HTML → 텍스트 변환 유틸리티 (스크립트 태그 등 제거 목적)
+function extractPlainText(html) {
+  if (!html) return "";
+
+  // 브라우저 환경에서 DOMParser를 사용해 안전하게 텍스트만 추출
+  if (typeof window !== "undefined" && typeof DOMParser !== "undefined") {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(String(html), "text/html");
+      return doc.body ? doc.body.textContent || "" : "";
+    } catch (e) {
+      // fall through to regex-based fallback below
+    }
+  }
+
+  // Fallback: 태그 생성에 쓰이는 각괄호만 제거하여 `<script` 등이 그대로 남지 않도록 처리
+  return String(html).replace(/<|>/g, "");
+}
+
 // ==========================================
 // [설정] .env 파일에서 키를 가져옵니다.
 // ==========================================
@@ -142,7 +161,7 @@ const fetchArticles = async (feeds, onProgress) => {
           item.querySelector("content")?.textContent ||
           "";
         const cleanSummary =
-          description.replace(/<[^>]*>?/gm, "").slice(0, 300) + "...";
+          extractPlainText(description).slice(0, 300) + "...";
 
         return {
           id: link || Math.random().toString(36),
