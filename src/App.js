@@ -86,34 +86,78 @@ const RSS_FEEDS = [
   },
 ];
 
+// 0.2초 대기 함수
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// 날짜 파싱 (XML용)
+const safelyParseDate = (dateString) => {
+  if (!dateString) return "Unknown";
+  try {
+    const d = new Date(dateString);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString().split("T")[0];
+    }
+  } catch (e) {}
+  return dateString; // 변환 실패하면 원본이라도 보여줌
+};
+
+// [엔진 교체] XML 직접 파싱 함수 (날짜 태그 보강)
 const fetchArticles = async (feeds, onProgress) => {
   let allArticles = [];
   const total = feeds.length;
+  const parser = new DOMParser();
 
   for (let i = 0; i < total; i++) {
     const feed = feeds[i];
     onProgress(((i + 1) / total) * 100, `Fetching ${feed.name}...`);
+
     try {
-      // 데이터는 여전히 넉넉하게 50개씩 가져옵니다 (놓치는 것 없도록)
       const proxyUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(
         feed.url
       )}&count=50`;
       const response = await fetch(proxyUrl);
-      const data = await response.json();
-      if (data.status === "ok") {
-        const items = data.items.map((item) => ({
-          id: item.guid || item.link,
+
+      if (!response.ok) throw new Error("Network response was not ok");
+
+      const text = await response.text();
+      const xmlDoc = parser.parseFromString(text, "text/xml");
+      const items = Array.from(xmlDoc.querySelectorAll("item"));
+
+      const parsedItems = items.map((item) => {
+        const title = item.querySelector("title")?.textContent || "";
+        const link = item.querySelector("link")?.textContent || "";
+
+        // [수정 포인트] 날짜가 어디 숨어있을지 모르니 다 찾아봅니다.
+        // 1. pubDate (일반적)
+        // 2. dc:date (의학 저널에서 많이 씀)
+        // 3. date 또는 updated (Atom 방식)
+        let rawDate = item.querySelector("pubDate")?.textContent;
+        if (!rawDate)
+          rawDate = item.getElementsByTagName("dc:date")[0]?.textContent;
+        if (!rawDate) rawDate = item.querySelector("date")?.textContent;
+        if (!rawDate) rawDate = item.querySelector("updated")?.textContent;
+
+        const description =
+          item.querySelector("description")?.textContent ||
+          item.querySelector("content")?.textContent ||
+          "";
+        const cleanSummary =
+          description.replace(/<[^>]*>?/gm, "").slice(0, 300) + "...";
+
+        return {
+          id: link || Math.random().toString(36),
           journal: feed.name,
           title: item.title,
           link: item.link,
           date: item.pubDate.split(" ")[0], // YYYY-MM-DD
           summary: item.description || item.content || "",
           matchedKeywords: [],
-        }));
-        allArticles = [...allArticles, ...items];
-      }
+        };
+      });
+
+      allArticles = [...allArticles, ...parsedItems];
     } catch (e) {
-      console.error(e);
+      console.warn(`Failed to fetch ${feed.name}:`, e);
     }
   }
   return allArticles;
@@ -263,7 +307,6 @@ export default function App() {
           <span className="font-bold text-lg text-emerald-700 hidden sm:inline">
             OncoReader
           </span>
-
           {/* 검색창 */}
           <div className="relative max-w-xs w-full ml-2">
             <Search
@@ -408,7 +451,6 @@ export default function App() {
         {/* 메인 콘텐츠 */}
         <main className="flex-1 bg-slate-50 overflow-y-auto p-4 custom-scrollbar">
           <div className="max-w-3xl mx-auto space-y-4">
-
 {/* 모바일용 날짜 필터 (화면 작을때만 보임) */}
             <div className="md:hidden flex overflow-x-auto gap-2 pb-2">
               {[
