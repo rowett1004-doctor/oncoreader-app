@@ -15,9 +15,6 @@ import {
   Tag,
 } from "lucide-react";
 
-// ==========================================
-// [설정] .env 파일에서 키를 가져옵니다.
-// ==========================================
 const API_KEY = process.env.REACT_APP_GEMINI_API_KEY;
 
 const RSS_FEEDS = [
@@ -185,7 +182,7 @@ export default function App() {
     try {
       const genAI = new GoogleGenerativeAI(API_KEY);
       const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
-      const prompt = `당신은 종양내과 전문의입니다. 다음 논문 초록을 요약하세요.\n제목: ${article.title}\n초록: ${article.summary}\n[형식]\n1. 핵심요약(3줄)\n2. 임상적 의의\n3. 추천 대상`;
+      const prompt = `당신은 종양내과 전문의입니다. 다음 논문 초록을 요약하세요.\n제목: ${article.title}\n초록: ${article.summary}\n[형식]\n1. 핵심요약(5줄)\n2. 임상적 의의\n3. 추천 대상`;
       const result = await model.generateContent(prompt);
       const response = await result.response;
       setAiSummary({ id: article.id, text: response.text() });
