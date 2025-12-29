@@ -11,6 +11,7 @@ import {
   X,
   Layers,
 } from "lucide-react";
+import striptags from "striptags";
 
 // ==========================================
 // [설정] .env 파일에서 키를 가져옵니다.
@@ -124,7 +125,7 @@ const fetchArticles = async (feeds, onProgress) => {
           item.querySelector("content")?.textContent ||
           "";
         const cleanSummary =
-          description.replace(/<[^>]*>?/gm, "").slice(0, 300) + "...";
+          striptags(description).slice(0, 300) + "...";
 
         return {
           id:
