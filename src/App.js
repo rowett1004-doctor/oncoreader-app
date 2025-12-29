@@ -10,35 +10,11 @@ import {
   Play,
   X,
   Layers,
-  Trash2,
-  Plus,
-  Tag,
 } from "lucide-react";
-
-
-// 간단한 HTML → 텍스트 변환 유틸리티 (스크립트 태그 등 제거 목적)
-function extractPlainText(html) {
-  if (!html) return "";
-
-  // 브라우저 환경에서 DOMParser를 사용해 안전하게 텍스트만 추출
-  if (typeof window !== "undefined" && typeof DOMParser !== "undefined") {
-    try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(String(html), "text/html");
-      return doc.body ? doc.body.textContent || "" : "";
-    } catch (e) {
-      // fall through to regex-based fallback below
-    }
-  }
-
-  // Fallback: 태그 생성에 쓰이는 각괄호만 제거하여 `<script` 등이 그대로 남지 않도록 처리
-  return String(html).replace(/<|>/g, "");
-}
 
 // ==========================================
 // [설정] .env 파일에서 키를 가져옵니다.
 // ==========================================
-
 const API_KEY = process.env.REACT_APP_GEMINI_API_KEY;
 
 const RSS_FEEDS = [
@@ -105,22 +81,17 @@ const RSS_FEEDS = [
   },
 ];
 
-// 0.2초 대기 함수
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// 날짜 파싱 (XML용)
 const safelyParseDate = (dateString) => {
   if (!dateString) return "Unknown";
   try {
     const d = new Date(dateString);
-    if (!isNaN(d.getTime())) {
-      return d.toISOString().split("T")[0];
-    }
+    if (!isNaN(d.getTime())) return d.toISOString().split("T")[0];
   } catch (e) {}
-  return dateString; // 변환 실패하면 원본이라도 보여줌
+  return dateString;
 };
 
-// [엔진 교체] XML 직접 파싱 함수 (날짜 태그 보강)
 const fetchArticles = async (feeds, onProgress) => {
   let allArticles = [];
   const total = feeds.length;
@@ -129,13 +100,13 @@ const fetchArticles = async (feeds, onProgress) => {
   for (let i = 0; i < total; i++) {
     const feed = feeds[i];
     onProgress(((i + 1) / total) * 100, `Fetching ${feed.name}...`);
-
     try {
-      const proxyUrl = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(
+      if (i > 0) await wait(200);
+      // 우회 서버 사용
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(
         feed.url
-      )}&count=50`;
+      )}&t=${Date.now()}`;
       const response = await fetch(proxyUrl);
-
       if (!response.ok) throw new Error("Network response was not ok");
 
       const text = await response.text();
@@ -143,40 +114,33 @@ const fetchArticles = async (feeds, onProgress) => {
       const items = Array.from(xmlDoc.querySelectorAll("item"));
 
       const parsedItems = items.map((item) => {
-        const title = item.querySelector("title")?.textContent || "";
-        const link = item.querySelector("link")?.textContent || "";
-
-        // [수정 포인트] 날짜가 어디 숨어있을지 모르니 다 찾아봅니다.
-        // 1. pubDate (일반적)
-        // 2. dc:date (의학 저널에서 많이 씀)
-        // 3. date 또는 updated (Atom 방식)
         let rawDate = item.querySelector("pubDate")?.textContent;
         if (!rawDate)
           rawDate = item.getElementsByTagName("dc:date")[0]?.textContent;
         if (!rawDate) rawDate = item.querySelector("date")?.textContent;
-        if (!rawDate) rawDate = item.querySelector("updated")?.textContent;
 
         const description =
           item.querySelector("description")?.textContent ||
           item.querySelector("content")?.textContent ||
           "";
         const cleanSummary =
-          extractPlainText(description).slice(0, 300) + "...";
+          description.replace(/<[^>]*>?/gm, "").slice(0, 300) + "...";
 
         return {
-          id: link || Math.random().toString(36),
+          id:
+            item.querySelector("link")?.textContent ||
+            Math.random().toString(36),
           journal: feed.name,
-          title: item.title,
-          link: item.link,
-          date: item.pubDate.split(" ")[0], // YYYY-MM-DD
-          summary: item.description || item.content || "",
+          title: item.querySelector("title")?.textContent || "",
+          link: item.querySelector("link")?.textContent || "",
+          date: safelyParseDate(rawDate),
+          summary: cleanSummary,
           matchedKeywords: [],
         };
       });
-
       allArticles = [...allArticles, ...parsedItems];
     } catch (e) {
-      console.warn(`Failed to fetch ${feed.name}:`, e);
+      console.warn(`Failed to fetch ${feed.name}`);
     }
   }
   return allArticles;
@@ -191,7 +155,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth > 1024);
   const [aiSummary, setAiSummary] = useState(null);
   const [analyzingId, setAnalyzingId] = useState(null);
-  const [dateRange, setDateRange] = useState("all"); // '7d', '30d', '90d', 'all'
+  const [dateRange, setDateRange] = useState("90d");
   const [keywords, setKeywords] = useState(
     () =>
       localStorage.getItem("keywords") ||
@@ -223,9 +187,11 @@ export default function App() {
 
   const toggleAllFeeds = () => {
     if (selectedFeeds.size === RSS_FEEDS.length) {
-      setSelectedFeeds(new Set());
-    } else {
-      setSelectedFeeds(new Set(RSS_FEEDS.map((f) => f.url)));
+      setSelectedFeeds(
+        selectedFeeds.size === RSS_FEEDS.length
+          ? new Set()
+          : new Set(RSS_FEEDS.map((f) => f.url))
+      );
     }
   };
 
@@ -241,14 +207,14 @@ export default function App() {
 
   const analyzeWithAI = async (article) => {
     if (!API_KEY) {
-      alert("API 키가 설정되지 않았습니다.");
+      alert("API 키 설정을 확인해주세요.");
       return;
     }
     setAnalyzingId(article.id);
     try {
       const genAI = new GoogleGenerativeAI(API_KEY);
       const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
-      const prompt = `당신은 종양내과 전문의입니다. 다음 논문 초록을 요약하세요.\n제목: ${article.title}\n초록: ${article.summary}\n[형식]\n1. 핵심요약(5줄)\n2. 임상적 의의\n3. 추천 대상`;
+      const prompt = `당신은 종양내과 전문의입니다. 다음 논문 초록을 요약하세요.\n제목: ${article.title}\n초록: ${article.summary}\n[형식]\n1. 핵심요약(3줄)\n2. 임상적 의의\n3. 추천 대상`;
       const result = await model.generateContent(prompt);
       const response = await result.response;
       setAiSummary({ id: article.id, text: response.text() });
@@ -266,10 +232,8 @@ export default function App() {
         .filter((k) => k),
     [keywords]
   );
-
   const filteredArticles = useMemo(() => {
     const now = new Date();
-
     return articles
       .map((a) => {
         const content = (a.title + " " + a.summary).toLowerCase();
@@ -277,30 +241,27 @@ export default function App() {
         return { ...a, matchedKeywords: matched };
       })
       .filter((a) => {
-        // 1. 키워드 필터 (관심 논문 모드일 때)
         if (viewMode === "interests" && a.matchedKeywords.length === 0)
           return false;
-
-        // 2. 검색어 필터
         if (
           searchTerm &&
           !a.title.toLowerCase().includes(searchTerm.toLowerCase())
         )
           return false;
-
-        // 3. 날짜 필터 로직
         if (dateRange !== "all") {
-          if (!a.date || a.date === "Unknown") return false;
-
-          const articleDate = new Date(a.date);
-          const diffTime = Math.abs(now - articleDate);
-          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-          if (dateRange === "7d" && diffDays > 7) return false;
-          if (dateRange === "30d" && diffDays > 30) return false;
-          if (dateRange === "90d" && diffDays > 90) return false;
+          if (!a.date || a.date === "Unknown") return true;
+          try {
+            const articleDate = new Date(a.date);
+            const diffDays = Math.ceil(
+              Math.abs(now - articleDate) / (1000 * 60 * 60 * 24)
+            );
+            if (dateRange === "7d" && diffDays > 7) return false;
+            if (dateRange === "30d" && diffDays > 30) return false;
+            if (dateRange === "90d" && diffDays > 90) return false;
+          } catch (e) {
+            return true;
+          }
         }
-
         return true;
       });
   }, [articles, viewMode, searchTerm, keywordList, dateRange]);
@@ -314,7 +275,6 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-800 font-sans overflow-hidden">
-      {/* 헤더 */}
       <header className="h-14 border-b flex items-center justify-between px-4 bg-white shadow-sm sticky top-0 z-30">
         <div className="flex items-center gap-3 flex-1">
           <button
@@ -326,7 +286,6 @@ export default function App() {
           <span className="font-bold text-lg text-emerald-700 hidden sm:inline">
             OncoReader
           </span>
-          {/* 검색창 */}
           <div className="relative max-w-xs w-full ml-2">
             <Search
               className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300"
@@ -341,16 +300,9 @@ export default function App() {
             />
           </div>
         </div>
-
         <div className="flex items-center gap-2">
-          {/* 날짜 필터 버튼 그룹 */}
           <div className="hidden md:flex bg-slate-100 p-1 rounded-lg mr-2">
-            {[
-              { label: "7일", value: "7d" },
-              { label: "30일", value: "30d" },
-              { label: "90일", value: "90d" },
-              { label: "전체", value: "all" },
-            ].map((opt) => (
+            {dateOptions.map((opt) => (
               <button
                 key={opt.value}
                 onClick={() => setDateRange(opt.value)}
@@ -364,20 +316,17 @@ export default function App() {
               </button>
             ))}
           </div>
-
           <button
             onClick={refreshData}
             disabled={loading}
             className="flex items-center gap-2 px-4 py-1.5 bg-emerald-600 text-white rounded-full text-xs font-bold shadow hover:bg-emerald-700 disabled:opacity-50"
           >
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} />{" "}
-            {loading ? "동기화..." : "Sync"}
+            {loading ? "Sync" : "Sync"}
           </button>
         </div>
       </header>
-
       <div className="flex flex-1 overflow-hidden relative">
-        {/* 사이드바 */}
         <aside
           className={`${
             isSidebarOpen ? "translate-x-0" : "-translate-x-full"
@@ -417,7 +366,6 @@ export default function App() {
                 )}
               </button>
             </nav>
-
             <div className="mb-4">
               <span className="text-[10px] font-bold text-slate-400 uppercase px-2 mb-2 block">
                 Keywords
@@ -428,7 +376,6 @@ export default function App() {
                 className="w-full p-2 text-xs border rounded-lg h-20 focus:border-emerald-500 outline-none resize-none bg-slate-50"
               />
             </div>
-
             <div>
               <div className="flex justify-between items-center px-2 mb-2">
                 <span className="text-[10px] font-bold text-slate-400 uppercase">
@@ -466,32 +413,23 @@ export default function App() {
             </div>
           </div>
         </aside>
-
-        {/* 메인 콘텐츠 */}
         <main className="flex-1 bg-slate-50 overflow-y-auto p-4 custom-scrollbar">
           <div className="max-w-3xl mx-auto space-y-4">
-{/* 모바일용 날짜 필터 (화면 작을때만 보임) */}
             <div className="md:hidden flex overflow-x-auto gap-2 pb-2">
-              {[
-                { l: "7일", v: "7d" },
-                { l: "30일", v: "30d" },
-                { l: "90일", v: "90d" },
-                { l: "전체", v: "all" },
-              ].map((o) => (
+              {dateOptions.map((o) => (
                 <button
-                  key={o.v}
-                  onClick={() => setDateRange(o.v)}
+                  key={o.value}
+                  onClick={() => setDateRange(o.value)}
                   className={`whitespace-nowrap px-3 py-1 rounded-full text-xs font-bold border ${
-                    dateRange === o.v
+                    dateRange === o.value
                       ? "bg-emerald-600 text-white border-emerald-600"
                       : "bg-white text-slate-500 border-slate-200"
                   }`}
                 >
-                  {o.l}
+                  {o.label}
                 </button>
               ))}
             </div>
-
             {loading && articles.length === 0 && (
               <div className="text-center py-12 text-slate-400">
                 <RefreshCw
@@ -504,20 +442,16 @@ export default function App() {
                 <p className="text-xs mt-1">{Math.round(progress.percent)}%</p>
               </div>
             )}
-
             {!loading && filteredArticles.length === 0 && (
               <div className="text-center py-20 text-slate-400">
                 <Layers size={48} className="mx-auto mb-4 opacity-30" />
                 <p>
                   표시할 논문이 없습니다.
                   <br />
-                  <span className="text-xs">
-                    상단의 'Sync' 버튼을 누르거나 필터를 변경해보세요.
-                  </span>
+                  <span className="text-xs">Sync 버튼을 눌러보세요.</span>
                 </p>
               </div>
             )}
-
             {filteredArticles.map((article, idx) => (
               <div
                 key={idx}
@@ -542,7 +476,6 @@ export default function App() {
                       {article.title}
                     </a>
                   </h3>
-
                   {article.matchedKeywords.length > 0 && (
                     <div className="flex gap-1 flex-wrap mb-3">
                       {article.matchedKeywords.map((k) => (
@@ -555,7 +488,6 @@ export default function App() {
                       ))}
                     </div>
                   )}
-
                   <div className="flex gap-2 mt-3 pt-3 border-t border-slate-50">
                     <button
                       onClick={() => analyzeWithAI(article)}
@@ -566,7 +498,7 @@ export default function App() {
                         <RefreshCw size={14} className="animate-spin" />
                       ) : (
                         <Play size={14} />
-                      )}
+                      )}{" "}
                       AI 요약
                     </button>
                     <a
@@ -579,7 +511,6 @@ export default function App() {
                     </a>
                   </div>
                 </div>
-
                 {aiSummary && aiSummary.id === article.id && (
                   <div className="bg-slate-50 p-4 border-t border-slate-100 text-sm text-slate-700 whitespace-pre-line leading-relaxed relative animate-fadeIn">
                     <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-200">
@@ -601,14 +532,7 @@ export default function App() {
           </div>
         </main>
       </div>
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        .animate-fadeIn { animation: fadeIn 0.3s ease-in; }
-      `}</style>
+      <style>{`.custom-scrollbar::-webkit-scrollbar{width:5px}.custom-scrollbar::-webkit-scrollbar-track{background:transparent}.custom-scrollbar::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:10px}.custom-scrollbar::-webkit-scrollbar-thumb:hover{background:#94a3b8}@keyframes fadeIn{from{opacity:0}to{opacity:1}}.animate-fadeIn{animation:fadeIn 0.3s ease-in}`}</style>
     </div>
   );
 }
